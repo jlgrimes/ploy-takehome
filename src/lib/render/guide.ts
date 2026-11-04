@@ -112,6 +112,9 @@ export async function pasteBackProduct(
   guide: Buffer,
   rect: Rect,
   productMask: Buffer | null,
+  // Our own fallback scene is derived from the guide, so the product cannot have
+  // moved; skip the check (blur would otherwise fail it and leave the product soft).
+  knownAligned = false,
 ): Promise<{ buffer: Buffer; aligned: boolean; diff: number }> {
   const small = { width: 96, height: Math.max(8, Math.round((96 * rect.height) / rect.width)) };
   const a = await sharp(scene).extract(rect).resize(small).greyscale().raw().toBuffer();
@@ -124,7 +127,7 @@ export async function pasteBackProduct(
     n++;
   }
   const diff = n ? sum / n : 255; // mean abs difference, 0-255
-  const aligned = diff < 28;
+  const aligned = knownAligned || diff < 28;
   if (!aligned) return { buffer: scene, aligned, diff };
   // Lifestyle photo: feathered rectangle so the seam blends into the extension.
   // Packshot: the product cutout itself.

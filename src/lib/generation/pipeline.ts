@@ -181,13 +181,13 @@ export async function generateVariant(opts: {
       guideAssetId = guideAsset.id;
       const prompt = scenePrompt({ direction: copy.sceneDirection || "a clean, softly lit studio set in the brand's colors", layout, isCutout: !!guide.productMask, productTitle: ctx.product.title, extraFeedback: opts.sceneInstruction });
       let scene = await generateScene({ guide: guide.buffer, guideUrl: guideAsset.public_url, prompt });
-      let pasted = await pasteBackProduct(scene.bytes, guide.buffer, guide.productRect, guide.productMask);
+      let pasted = await pasteBackProduct(scene.bytes, guide.buffer, guide.productRect, guide.productMask, scene.strategy === "studio_fallback");
       let check = await checkScene({ original, scene: pasted.buffer, zonesHint: layout.sceneHint, productPixelsPasted: pasted.aligned });
       // One retry if the model invented text or lost the product.
       if (scene.strategy === "fal" && (check.inventedText || !check.productMatches)) {
         const retryPrompt = `${prompt} IMPORTANT: the previous attempt ${check.inventedText ? "added text or lettering" : "changed the product"}; do not.`;
         const second = await generateScene({ guide: guide.buffer, guideUrl: guideAsset.public_url, prompt: retryPrompt });
-        const pasted2 = await pasteBackProduct(second.bytes, guide.buffer, guide.productRect, guide.productMask);
+        const pasted2 = await pasteBackProduct(second.bytes, guide.buffer, guide.productRect, guide.productMask, second.strategy === "studio_fallback");
         const check2 = await checkScene({ original, scene: pasted2.buffer, zonesHint: layout.sceneHint, productPixelsPasted: pasted2.aligned });
         if ((!check2.inventedText && check2.productMatches) || check.inventedText) (scene = second), (pasted = pasted2), (check = check2);
       }
@@ -222,7 +222,8 @@ export async function generateVariant(opts: {
       .eq("id", variant.id);
     await db().from("ads").update({ status: "needs_review", updated_at: new Date().toISOString() }).eq("id", opts.adId);
     opts.onStatus?.("ready");
-    return { variantId: variant.id, version: variant.version, renderUrl: renderAsset.public_url, copy };
+    const fallbackNote = gen.strategy === "studio_fallback" ? `Image model unavailable (${String(gen.error ?? "").slice(0, 120)}); used a studio backdrop around the real product photo` : undefined;
+    return { variantId: variant.id, version: variant.version, renderUrl: renderAsset.public_url, copy, fallbackNote };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("variant failed", opts.adId, msg);
@@ -301,7 +302,7 @@ export async function* generateCampaignAds(campaignId: string): AsyncGenerator<A
             emit(state.map((s) => ({ ...s })));
           },
         });
-        state[i] = { ...state[i], status: res.renderUrl ? "ready" : "failed", renderUrl: res.renderUrl, headline: "copy" in res ? res.copy?.headline : undefined, detail: "error" in res ? res.error : undefined };
+        state[i] = { ...state[i], status: res.renderUrl ? "ready" : "failed", renderUrl: res.renderUrl, headline: "copy" in res ? res.copy?.headline : undefined, detail: "error" in res ? res.error : "fallbackNote" in res ? res.fallbackNote : undefined };
         emit(state.map((s) => ({ ...s })));
       }),
     );
