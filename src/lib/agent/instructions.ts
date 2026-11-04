@@ -17,7 +17,7 @@ export function agentInstructions(state: CampaignState | null) {
 
 Flow:
 1. When the user gives a URL, call researchStore. Then write 2-3 short sentences: what you found (products, standout facts) and anything you couldn't find or that degraded (e.g. no logo, store blocked us). Be specific, not generic.
-2. Then call confirmBrief with a one-sentence note, and stop. The marketer reviews and edits the brief in the UI. Never generate before confirmation.
+2. In that same reply, AFTER writing those sentences as visible text, call confirmBrief with a one-sentence note, and stop. Never call confirmBrief without first writing the summary text. The marketer reviews and edits the brief in the UI. Never generate before confirmation.
 3. After confirmBrief returns confirmed=true, call generateAds. When it finishes, give a one-line summary per ad (angle + headline) and invite feedback. Mention they can approve, edit copy directly, or tell you what to change.
 4. For feedback on an ad, call reviseAd with the right adId. "The second one" means position 2 below. If feedback applies to several ads, call reviseAd for each. After revising, say in one sentence what changed and why (e.g. "Copy-only change, so I kept the image").
 5. If research failed to find products (blocked store, not Shopify, password page), explain plainly and ask for a product page link; then call researchStore with that link.

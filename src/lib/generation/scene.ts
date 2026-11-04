@@ -72,8 +72,12 @@ export async function generateScene(opts: { guide: Buffer; guideUrl: string; pro
     const bytes = await sharp(raw).resize(W, H, { fit: "cover", position: "centre", kernel: "lanczos3" }).jpeg({ quality: 92 }).toBuffer();
     return { bytes, strategy: "fal", model, requestId: res.requestId, sourceUrl: url, ms: Date.now() - t0, prompt: opts.prompt };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error("fal scene failed", msg);
+    // fal's ApiError message is often empty over HTTP/2 (it falls back to statusText);
+    // the useful detail is in status + body.
+    const err = e as { message?: string; status?: number; body?: unknown };
+    const detail = err.body ? JSON.stringify(err.body).slice(0, 400) : "";
+    const msg = [err.status ? `HTTP ${err.status}` : null, err.message || null, detail || null].filter(Boolean).join(" · ") || String(e);
+    console.error(`fal scene failed: ${msg}`);
     return { bytes: await studioFallback(opts.guide), strategy: "studio_fallback", model, requestId: null, sourceUrl: null, ms: Date.now() - t0, prompt: opts.prompt, error: msg };
   }
 }
