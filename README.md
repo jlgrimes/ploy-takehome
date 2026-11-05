@@ -2,6 +2,16 @@
 
 From a store URL to full-screen 9:16 interstitial ads a marketer would actually run. The agent researches the store, proposes a brief the marketer confirms, generates ads around the store's real product photos, and iterates on feedback.
 
+## Deliverables
+
+| | |
+| --- | --- |
+| Live app | https://ploy-takehome-kappa.vercel.app |
+| Repository | https://github.com/jlgrimes/ploy-takehome |
+| Architecture diagram (Excalidraw) | https://excalidraw.com/#json=L85UAHxx7c_c70ec2O6y4,INm_HNlXO7gTzTdGnxX_ig |
+| Loom walkthrough | Coming soon |
+| Coding agent transcript | [transcripts/session-1.md](transcripts/session-1.md) |
+
 ## How it works
 
 ```
