@@ -37,11 +37,13 @@ const inputCls = "w-full rounded-lg border bg-background px-2.5 py-1.5 text-sm o
 
 export function BriefCard({
   state,
+  findings,
   note,
   readOnly,
   onConfirm,
 }: {
   state: CampaignState;
+  findings?: string;
   note?: string;
   readOnly?: boolean;
   onConfirm?: (brief: Brief, changes: string[]) => Promise<void>;
@@ -124,7 +126,8 @@ export function BriefCard({
       </div>
 
       <div className="space-y-4 p-4">
-        {note ? <p className="text-sm">{note}</p> : null}
+        {findings ? <p className="text-sm text-muted-foreground">{findings}</p> : null}
+        {note ? <p className="text-sm font-medium">{note}</p> : null}
 
         {/* concepts */}
         <div>

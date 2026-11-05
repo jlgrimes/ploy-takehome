@@ -25,7 +25,12 @@ export function campaignTools(campaignId: string) {
     confirmBrief: tool({
       description:
         "Show the marketer the proposed creative brief (products, angles, brand voice, offer, words to avoid) and wait for them to confirm or edit it. Always call this after research and before generating ads.",
-      inputSchema: z.object({ note: z.string().describe("One short sentence introducing the brief, e.g. what you'd lead with and why") }),
+      inputSchema: z.object({
+        findings: z
+          .string()
+          .describe("2-3 short sentences on what research found: catalog size, standout facts, and anything missing or degraded (no logo, blocked store, sold-out best sellers). Specific, not generic."),
+        note: z.string().describe("One short sentence introducing the brief, e.g. what you'd lead with and why"),
+      }),
       outputSchema: z.object({
         confirmed: z.boolean(),
         changes: z.array(z.string()).describe("What the marketer changed on the brief, if anything"),

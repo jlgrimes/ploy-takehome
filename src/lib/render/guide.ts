@@ -1,5 +1,5 @@
 import "server-only";
-import sharp from "sharp";
+import sharp, { type OverlayOptions } from "sharp";
 import { AD_HEIGHT as H, AD_WIDTH as W } from "../constants";
 import type { Layout, Rect } from "./layouts";
 
@@ -15,32 +15,53 @@ export type Guide = {
   // Alpha mask (PNG, rect-sized) of the product's own pixels when the photo is a
   // packshot on a plain light background; null for full-bleed lifestyle photos.
   productMask: Buffer | null;
+  // Deliberate "studio" scene used when the image model is unavailable: brand-toned
+  // gradient with the real product (cutout or rounded photo card) and a soft shadow.
+  studio: Buffer;
 };
 
-// Plain-background cutout: flood-fill near-white pixels connected to the border.
-// Returns null unless the border is overwhelmingly light (i.e. it's a packshot).
+// Plain-background cutout. Verified need: Loopy's "Dusty Plum" packshot sits on a
+// light lavender studio backdrop, not white; treating it as a full photo pasted a
+// lavender box onto the generated scene. So: take the border's median color; if the
+// border is uniform, flood-fill pixels close to that color from the edges.
 export async function plainBackgroundMask(img: Buffer): Promise<Buffer | null> {
   const { data, info } = await sharp(img).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width: w, height: h } = info;
-  const light = (i: number) => data[i * 3] > 232 && data[i * 3 + 1] > 232 && data[i * 3 + 2] > 232;
-  let border = 0, lightBorder = 0;
-  for (let x = 0; x < w; x++) for (const y of [0, h - 1]) (border++, light(y * w + x) && lightBorder++);
-  for (let y = 0; y < h; y++) for (const x of [0, w - 1]) (border++, light(y * w + x) && lightBorder++);
-  if (lightBorder / border < 0.9) return null;
+  const borderIdx: number[] = [];
+  for (let x = 0; x < w; x++) borderIdx.push(x, (h - 1) * w + x);
+  for (let y = 0; y < h; y++) borderIdx.push(y * w, y * w + w - 1);
+  const median = (k: number) => borderIdx.map((i) => data[i * 3 + k]).sort((p, q) => p - q)[borderIdx.length >> 1];
+  const bgc = [median(0), median(1), median(2)];
+  const dist = (i: number) => Math.max(Math.abs(data[i * 3] - bgc[0]), Math.abs(data[i * 3 + 1] - bgc[1]), Math.abs(data[i * 3 + 2] - bgc[2]));
+  const uniform = borderIdx.filter((i) => dist(i) <= 22).length / borderIdx.length;
+  if (uniform < 0.85) return null; // busy border: a lifestyle photo, keep it whole
+  const near = (i: number) => dist(i) <= 26;
   const bg = new Uint8Array(w * h);
   const stack: number[] = [];
-  const push = (i: number) => { if (!bg[i] && light(i)) { bg[i] = 1; stack.push(i); } };
-  for (let x = 0; x < w; x++) (push(x), push((h - 1) * w + x));
-  for (let y = 0; y < h; y++) (push(y * w), push(y * w + w - 1));
+  const push = (i: number) => {
+    if (!bg[i] && near(i)) {
+      bg[i] = 1;
+      stack.push(i);
+    }
+  };
+  for (const i of borderIdx) push(i);
   while (stack.length) {
-    const i = stack.pop()!; const x = i % w; const y = (i / w) | 0;
-    if (x > 0) push(i - 1); if (x < w - 1) push(i + 1); if (y > 0) push(i - w); if (y < h - 1) push(i + w);
+    const i = stack.pop()!;
+    const x = i % w;
+    const y = (i / w) | 0;
+    if (x > 0) push(i - 1);
+    if (x < w - 1) push(i + 1);
+    if (y > 0) push(i - w);
+    if (y < h - 1) push(i + w);
   }
   const alpha = Buffer.alloc(w * h);
   let fg = 0;
-  for (let i = 0; i < w * h; i++) (alpha[i] = bg[i] ? 0 : 255, fg += bg[i] ? 0 : 1);
-  if (fg / (w * h) < 0.05) return null; // nothing left: probably not a packshot
-  // Erode ~2px (JPEG ringing leaves a light halo at edges), then soften the edge.
+  for (let i = 0; i < w * h; i++) {
+    alpha[i] = bg[i] ? 0 : 255;
+    if (!bg[i]) fg++;
+  }
+  if (fg / (w * h) < 0.05 || fg / (w * h) > 0.92) return null; // nothing or everything left
+  // Erode ~2px (JPEG ringing leaves a halo at edges), then soften the edge.
   const eroded = await sharp(alpha, { raw: { width: w, height: h, channels: 1 } }).blur(2).threshold(215).png().toBuffer();
   return sharp(eroded).blur(0.8).png().toBuffer();
 }
@@ -101,7 +122,42 @@ export async function buildGuide(photo: Buffer, layout: Layout): Promise<Guide> 
     .jpeg({ quality: 92 })
     .toBuffer();
   const productMask = rawMask ? await sharp(fitted.data).ensureAlpha().extractChannel(3).png().toBuffer() : null;
-  return { buffer, productRect, tone, productMask };
+  const studio = await buildStudio(fitted.data, productRect, tone, !!rawMask);
+  return { buffer, productRect, tone, productMask, studio };
+}
+
+async function buildStudio(product: Buffer, rect: Rect, tone: { r: number; g: number; b: number }, isCutout: boolean): Promise<Buffer> {
+  const shade = (k: number) => `rgb(${Math.round(tone.r * k)},${Math.round(tone.g * k)},${Math.round(tone.b * k)})`;
+  const light = `rgb(${Math.min(255, tone.r + 22)},${Math.min(255, tone.g + 22)},${Math.min(255, tone.b + 22)})`;
+  const bg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${light}"/><stop offset="0.55" stop-color="${shade(0.97)}"/><stop offset="1" stop-color="${shade(0.8)}"/></linearGradient><radialGradient id="v" cx="50%" cy="45%" r="75%"><stop offset="0.6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.18"/></radialGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><rect width="100%" height="100%" fill="url(#v)"/></svg>`,
+  );
+  const r = 40;
+  const layers: OverlayOptions[] = [];
+  if (isCutout) {
+    // Contact shadow under the product.
+    const sw = Math.round(rect.width * 0.8);
+    layers.push({
+      input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${sw}" height="120"><defs><filter id="b"><feGaussianBlur stdDeviation="18"/></filter></defs><ellipse cx="${sw / 2}" cy="60" rx="${sw / 2 - 30}" ry="22" fill="#000" fill-opacity="0.28" filter="url(#b)"/></svg>`),
+      left: rect.left + Math.round((rect.width - sw) / 2),
+      top: Math.min(H - 120, rect.top + rect.height - 70),
+    });
+    layers.push({ input: product, left: rect.left, top: rect.top });
+  } else {
+    // Photo card: rounded corners + drop shadow, so it reads as intentional.
+    const pad = 60;
+    layers.push({
+      input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${rect.width + pad * 2}" height="${rect.height + pad * 2}"><defs><filter id="b"><feGaussianBlur stdDeviation="22"/></filter></defs><rect x="${pad}" y="${pad + 18}" width="${rect.width}" height="${rect.height}" rx="${r}" fill="#000" fill-opacity="0.32" filter="url(#b)"/></svg>`),
+      left: rect.left - pad,
+      top: rect.top - pad,
+    });
+    const rounded = await sharp(product)
+      .composite([{ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${rect.width}" height="${rect.height}"><rect width="${rect.width}" height="${rect.height}" rx="${r}" fill="#fff"/></svg>`), blend: "dest-in" }])
+      .png()
+      .toBuffer();
+    layers.push({ input: rounded, left: rect.left, top: rect.top });
+  }
+  return sharp(bg).composite(layers).jpeg({ quality: 92 }).toBuffer();
 }
 
 // After generation: if the model kept the product where we put it, paste the
@@ -129,9 +185,9 @@ export async function pasteBackProduct(
   const diff = n ? sum / n : 255; // mean abs difference, 0-255
   const aligned = knownAligned || diff < 28;
   if (!aligned) return { buffer: scene, aligned, diff };
-  // Lifestyle photo: feathered rectangle so the seam blends into the extension.
-  // Packshot: the product cutout itself.
-  const feather = 18;
+  // Lifestyle photo: wide feathered rectangle so the seam blends into the extension
+  // (an 18px feather left a visible seam on real fal output). Packshot: the cutout.
+  const feather = Math.max(24, Math.round(Math.min(rect.width, rect.height) * 0.07));
   const mask = productMask
     ? productMask
     : await sharp(
@@ -139,7 +195,15 @@ export async function pasteBackProduct(
           `<svg xmlns="http://www.w3.org/2000/svg" width="${rect.width}" height="${rect.height}"><defs><filter id="f"><feGaussianBlur stdDeviation="${feather / 2}"/></filter></defs><rect x="${feather}" y="${feather}" width="${rect.width - feather * 2}" height="${rect.height - feather * 2}" fill="white" filter="url(#f)"/></svg>`,
         ),
       ).ensureAlpha().extractChannel(3).png().toBuffer();
-  const productRgb = await sharp(guide).extract(rect).removeAlpha().png().toBuffer();
+  let productRgb = await sharp(guide).extract(rect).removeAlpha().png().toBuffer();
+  if (!productMask) {
+    // The model often shifts white balance slightly around the photo; nudge the
+    // original toward the scene's tone (tightly clamped so product colors stay true).
+    const [gs, ss] = await Promise.all([sharp(productRgb).stats(), sharp(scene).extract(rect).stats()]);
+    const gain = [0, 1, 2].map((k) => Math.min(1.06, Math.max(0.94, (ss.channels[k].stdev || 1) / (gs.channels[k].stdev || 1))));
+    const off = [0, 1, 2].map((k) => Math.min(10, Math.max(-10, ss.channels[k].mean - gain[k] * gs.channels[k].mean)));
+    productRgb = await sharp(productRgb).linear(gain, off).png().toBuffer();
+  }
   const productPixels = await sharp(productRgb).joinChannel(await sharp(mask).resize(rect.width, rect.height).toColourspace("b-w").raw().toBuffer(), { raw: { width: rect.width, height: rect.height, channels: 1 } }).png().toBuffer();
   const buffer = await sharp(scene).composite([{ input: productPixels, left: rect.left, top: rect.top }]).jpeg({ quality: 92 }).toBuffer();
   return { buffer, aligned, diff };

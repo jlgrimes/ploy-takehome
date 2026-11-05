@@ -180,14 +180,17 @@ export async function generateVariant(opts: {
       const guideAsset = await saveAsset({ bytes: guide.buffer, kind: "guide", brandId: ctx.brand.id, path: `${base}/guide.jpg`, mime: "image/jpeg" });
       guideAssetId = guideAsset.id;
       const prompt = scenePrompt({ direction: copy.sceneDirection || "a clean, softly lit studio set in the brand's colors", layout, isCutout: !!guide.productMask, productTitle: ctx.product.title, extraFeedback: opts.sceneInstruction });
-      let scene = await generateScene({ guide: guide.buffer, guideUrl: guideAsset.public_url, prompt });
-      let pasted = await pasteBackProduct(scene.bytes, guide.buffer, guide.productRect, guide.productMask, scene.strategy === "studio_fallback");
+      let scene = await generateScene({ guideUrl: guideAsset.public_url, prompt, studio: guide.studio });
+      // Studio fallback already contains the exact product; only model output needs paste-back.
+      const restore = (sc: typeof scene) =>
+        sc.strategy === "studio_fallback" ? Promise.resolve({ buffer: sc.bytes, aligned: true, diff: 0 }) : pasteBackProduct(sc.bytes, guide.buffer, guide.productRect, guide.productMask);
+      let pasted = await restore(scene);
       let check = await checkScene({ original, scene: pasted.buffer, zonesHint: layout.sceneHint, productPixelsPasted: pasted.aligned });
       // One retry if the model invented text or lost the product.
       if (scene.strategy === "fal" && (check.inventedText || !check.productMatches)) {
         const retryPrompt = `${prompt} IMPORTANT: the previous attempt ${check.inventedText ? "added text or lettering" : "changed the product"}; do not.`;
-        const second = await generateScene({ guide: guide.buffer, guideUrl: guideAsset.public_url, prompt: retryPrompt });
-        const pasted2 = await pasteBackProduct(second.bytes, guide.buffer, guide.productRect, guide.productMask, second.strategy === "studio_fallback");
+        const second = await generateScene({ guideUrl: guideAsset.public_url, prompt: retryPrompt, studio: guide.studio });
+        const pasted2 = await restore(second);
         const check2 = await checkScene({ original, scene: pasted2.buffer, zonesHint: layout.sceneHint, productPixelsPasted: pasted2.aligned });
         if ((!check2.inventedText && check2.productMatches) || check.inventedText) (scene = second), (pasted = pasted2), (check = check2);
       }

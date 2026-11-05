@@ -42,42 +42,50 @@ function toInput(model: string, prompt: string, guideUrl: string) {
   return { prompt, image_urls: [guideUrl], aspect_ratio: "9:16", resolution: "2K", output_format: "jpeg", num_images: 1 };
 }
 
-// Graceful degradation when fal is unavailable: the guide itself, softened into a
-// clean studio backdrop. The product is still the real photo; the ad still ships.
-async function studioFallback(guide: Buffer): Promise<Buffer> {
-  const bg = await sharp(guide).blur(40).modulate({ brightness: 1.02 }).toBuffer();
-  const vignette = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs><radialGradient id="v" cx="50%" cy="48%" r="70%"><stop offset="60%" stop-color="#000" stop-opacity="0"/><stop offset="100%" stop-color="#000" stop-opacity="0.22"/></radialGradient></defs><rect width="100%" height="100%" fill="url(#v)"/></svg>`,
-  );
-  return sharp(bg).composite([{ input: vignette }]).jpeg({ quality: 92 }).toBuffer();
+function describe(e: unknown): { msg: string; retryable: boolean } {
+  // fal's ApiError message is often empty over HTTP/2 (it falls back to statusText);
+  // the useful detail is in status + body.
+  const err = e as { message?: string; status?: number; body?: unknown };
+  const detail = err.body ? JSON.stringify(err.body).slice(0, 400) : "";
+  const msg = [err.status ? `HTTP ${err.status}` : null, err.message || null, detail || null].filter(Boolean).join(" · ") || String(e);
+  // Billing/auth/validation errors won't fix themselves; timeouts and 5xx might.
+  const retryable = !err.status || err.status >= 500 || err.status === 429;
+  return { msg, retryable };
 }
 
-export async function generateScene(opts: { guide: Buffer; guideUrl: string; prompt: string }): Promise<SceneResult> {
+async function runFal(model: string, prompt: string, guideUrl: string) {
+  const res = await fal.subscribe(model, { input: toInput(model, prompt, guideUrl) as never, logs: false, startTimeout: 90 });
+  const data = res.data as { images?: { url: string }[]; image?: { url: string } };
+  const url = data.images?.[0]?.url ?? data.image?.url;
+  if (!url) throw new Error("fal returned no image");
+  // fal URLs are not durable: download now, caller persists to Storage.
+  const dl = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!dl.ok) throw new Error(`download scene: HTTP ${dl.status}`);
+  const raw = Buffer.from(await dl.arrayBuffer());
+  const bytes = await sharp(raw).resize(W, H, { fit: "cover", position: "centre", kernel: "lanczos3" }).jpeg({ quality: 92 }).toBuffer();
+  return { bytes, requestId: res.requestId, url };
+}
+
+// When fal is unavailable the ad still ships: the guide's "studio" version (brand-
+// toned gradient, the real product as a cutout or rounded photo card, soft shadow).
+export async function generateScene(opts: { guideUrl: string; prompt: string; studio: Buffer }): Promise<SceneResult> {
   const t0 = Date.now();
   const key = env.falKey();
   const model = env.sceneModel();
-  if (!key) {
-    return { bytes: await studioFallback(opts.guide), strategy: "studio_fallback", model: null, requestId: null, sourceUrl: null, ms: Date.now() - t0, prompt: opts.prompt, error: "FAL_KEY not configured" };
-  }
+  const fallback = (error: string): SceneResult => ({ bytes: opts.studio, strategy: "studio_fallback", model: key ? model : null, requestId: null, sourceUrl: null, ms: Date.now() - t0, prompt: opts.prompt, error });
+  if (!key) return fallback("FAL_KEY not configured");
   fal.config({ credentials: key });
-  try {
-    const res = await fal.subscribe(model, { input: toInput(model, opts.prompt, opts.guideUrl) as never, logs: false });
-    const data = res.data as { images?: { url: string }[]; image?: { url: string } };
-    const url = data.images?.[0]?.url ?? data.image?.url;
-    if (!url) throw new Error("fal returned no image");
-    // fal URLs are not durable: download now, caller persists to Storage.
-    const dl = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    if (!dl.ok) throw new Error(`download scene: HTTP ${dl.status}`);
-    const raw = Buffer.from(await dl.arrayBuffer());
-    const bytes = await sharp(raw).resize(W, H, { fit: "cover", position: "centre", kernel: "lanczos3" }).jpeg({ quality: 92 }).toBuffer();
-    return { bytes, strategy: "fal", model, requestId: res.requestId, sourceUrl: url, ms: Date.now() - t0, prompt: opts.prompt };
-  } catch (e) {
-    // fal's ApiError message is often empty over HTTP/2 (it falls back to statusText);
-    // the useful detail is in status + body.
-    const err = e as { message?: string; status?: number; body?: unknown };
-    const detail = err.body ? JSON.stringify(err.body).slice(0, 400) : "";
-    const msg = [err.status ? `HTTP ${err.status}` : null, err.message || null, detail || null].filter(Boolean).join(" · ") || String(e);
-    console.error(`fal scene failed: ${msg}`);
-    return { bytes: await studioFallback(opts.guide), strategy: "studio_fallback", model, requestId: null, sourceUrl: null, ms: Date.now() - t0, prompt: opts.prompt, error: msg };
+  let lastError = "";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const r = await runFal(model, opts.prompt, opts.guideUrl);
+      return { bytes: r.bytes, strategy: "fal", model, requestId: r.requestId, sourceUrl: r.url, ms: Date.now() - t0, prompt: opts.prompt };
+    } catch (e) {
+      const { msg, retryable } = describe(e);
+      lastError = attempt > 1 ? `${msg} (after retry)` : msg;
+      console.error(`fal scene failed (attempt ${attempt}): ${msg}`);
+      if (!retryable) break;
+    }
   }
+  return fallback(lastError);
 }

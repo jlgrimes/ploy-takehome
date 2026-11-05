@@ -16,7 +16,9 @@ const schema = z.object({
   subline: z.string().nullable().describe("Optional supporting line, max 60 characters, or null"),
   cta: z.string().describe("Button label, 1-3 words"),
   factIds: z.array(z.string()).describe("ids of the facts this copy relies on (required for any number, rating, guarantee or claim)"),
-  showRating: z.boolean().describe("true only for social-proof ads that cite a rating or review fact"),
+  showRating: z
+    .boolean()
+    .describe("true only for social-proof ads that cite a rating or review fact. The renderer then prints that fact as a star row above the headline, so the headline should carry the benefit, not repeat the number."),
   sceneDirection: z
     .string()
     .describe("Visual setting for the background, max 35 words: place, surface, props, light, mood. Matches the brand. No people unless the product photo already has them. No text."),
@@ -39,7 +41,11 @@ export function validateCopy(c: CopyDraft, facts: Fact[], brief: Brief): string[
   const text = `${c.headline} ${c.subline ?? ""}`.toLowerCase();
   if (!brief.offer && /(%|\bsale\b|\bdiscount|\bpercent\b|\b\d+\s*off\b|\bdeal\b|\bcoupon|\bpromo)/i.test(text)) errs.push("Mentions a discount/offer, but the marketer confirmed no offer.");
   for (const word of brief.avoid) if (word.trim() && text.includes(word.trim().toLowerCase())) errs.push(`Uses "${word}", which the brand asked to avoid.`);
-  if (c.showRating && !cited.some((f) => f.kind === "rating" || f.kind === "review_count")) errs.push("showRating requires citing a rating or review fact.");
+  const proof = cited.find((f) => f.kind === "rating" || f.kind === "review_count");
+  if (c.showRating && !proof) errs.push("showRating requires citing a rating or review fact.");
+  // The star row already prints the proof line; repeating its number in the headline wastes the headline.
+  if (c.showRating && proof && numbersIn(c.headline).some((n) => numbersIn(proof.text).includes(n)))
+    errs.push(`The rating row already says "${proof.text}"; the headline must say something else (the benefit), not repeat it.`);
   return errs;
 }
 

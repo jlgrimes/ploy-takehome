@@ -9,7 +9,7 @@ import { renderAd } from "../src/lib/render/text-layer";
 const dir = process.argv[2];
 const out = process.argv[3] ?? ".";
 // Synthetic packshot: a "phone case" on white.
-const packshot = await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="720" height="960"><rect width="720" height="960" fill="#ffffff"/><rect x="210" y="130" width="300" height="620" rx="54" fill="#c8a27a"/><circle cx="300" cy="230" r="46" fill="#3b2a1e"/><path d="M260 520 q100 -60 200 0" stroke="#7a4f2c" stroke-width="18" fill="none"/></svg>`)).jpeg().toBuffer();
+const packshot = await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="720" height="960"><rect width="720" height="960" fill="#d9cfe0"/><rect x="210" y="130" width="300" height="620" rx="54" fill="#c8a27a"/><circle cx="300" cy="230" r="46" fill="#3b2a1e"/><path d="M260 520 q100 -60 200 0" stroke="#7a4f2c" stroke-width="18" fill="none"/></svg>`)).jpeg().toBuffer();
 const lifestyle = await readFile(`${dir}/coffee.png`);
 const brand = { name: "Loopy", primary: "#166534", ink: "#1F2A21", logoPng: null, font: null };
 
@@ -23,6 +23,8 @@ for (const [name, photo, layout, copy] of [
   const fakeScene = await sharp(guide.buffer).modulate({ brightness: 0.9, saturation: 1.2 }).blur(2).toBuffer();
   const pasted = await pasteBackProduct(fakeScene, guide.buffer, guide.productRect, guide.productMask);
   const r = await renderAd({ scene: pasted.buffer, layout, copy, brand });
+  const studio = await renderAd({ scene: guide.studio, layout, copy, brand });
+  await writeFile(`${out}/smoke-${name}-studio.jpg`, studio.jpg);
   await writeFile(`${out}/smoke-${name}-guide.jpg`, guide.buffer);
   await writeFile(`${out}/smoke-${name}.jpg`, r.jpg);
   console.log(name, { mask: !!guide.productMask, aligned: pasted.aligned, diff: pasted.diff.toFixed(1), legibility: r.legibility });

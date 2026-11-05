@@ -104,6 +104,7 @@ export function ChatPanel({
                         <BriefCard
                           key={`${key}-${state.campaign.briefConfirmedAt ?? "open"}`}
                           state={state}
+                          findings={part.state === "input-available" || answered ? part.input.findings : undefined}
                           note={part.state === "input-available" || answered ? part.input.note : undefined}
                           readOnly={answered || busy}
                           onConfirm={part.state === "input-available" ? (brief, changes) => confirmBrief(part.toolCallId, brief, changes) : undefined}
