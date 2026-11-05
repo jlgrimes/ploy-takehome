@@ -3,4 +3,6 @@ UI - kept it simple with the Vercel AI elements powering the main interface of t
 
 Model layer - I used Jev for the feedback decision layer, because of the impressive speed gain we get by returning a boolean decision (ie where in the pipeline we need to regenerate everything from), Haiku + Sonnet for the cheaper stuff, text generation, chat handling.
 
-How the ad is generated - I wanted to leave as little to the FAL as possible due to text hallucinations, so I gave explicit instructions to not generate any text, and didn’t have text as part of the FAL process. instead, I simply 
+How the ad is generated - I wanted to leave as little to the FAL as possible due to text hallucinations, so I gave explicit instructions to not generate any text, and didn’t have text as part of the FAL process. instead, I generated a template, then added everything on top of it after the FAL is processed.
+
+Scope - I scoped it to just Shopify due to architecture simplicity. This can easily be adjusted with some scraper for other sites as well, but requires another architecture to be built on top of it to properly maintain.
