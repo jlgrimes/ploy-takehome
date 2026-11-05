@@ -123,7 +123,7 @@ export function ChatPanel({
                       if (out?.status === "needs_clarification")
                         return (
                           <div key={key} className="rounded-lg border bg-card px-3 py-2 text-sm text-muted-foreground">
-                            Not sure what to change{out.plan?.confidence != null ? ` (best guess ${Math.round(out.plan.confidence * 100)}% ${out.plan.kind})` : ""}, so I'm asking first.
+                            Not sure what to change{out.plan?.confidence != null ? ` (best guess ${Math.round(out.plan.confidence * 100)}% ${out.plan.kind})` : ""}, so I&apos;m asking first.
                           </div>
                         );
                       const done = out?.status === "ready";
