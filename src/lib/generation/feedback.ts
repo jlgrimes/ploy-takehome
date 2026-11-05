@@ -11,6 +11,12 @@ const schema = z.object({
   kind: z.enum(["copy", "scene", "brief"]),
   copyInstruction: z.string().nullable().describe("What to change in the words, if anything"),
   sceneInstruction: z.string().nullable().describe("What to change in the visual, if anything"),
+  newSceneDirection: z
+    .string()
+    .nullable()
+    .describe(
+      "For scene feedback: the COMPLETE replacement scene description (max 35 words: place, surface, props, light, mood). Keep whatever the feedback doesn't change. No text, no people unless the product photo already has them. Null otherwise.",
+    ),
   alsoChangeCopy: z.boolean().describe("for scene feedback: does the copy also need to change?"),
   briefChange: z
     .object({

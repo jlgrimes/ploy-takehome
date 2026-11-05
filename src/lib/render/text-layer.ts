@@ -146,9 +146,22 @@ export async function renderAd(opts: { scene: Buffer; layout: LayoutKey; copy: R
     logoWidth = Math.min(420, Math.round(((m.width ?? 200) / (m.height ?? 72)) * 72));
   }
 
+  // The button itself must stand out from what's behind it (verified failure: a
+  // default #111 button vanished on a dark Liquid Death scene). Measure the area under
+  // the button, account for the scrim, and swap to white/ink if contrast is too low.
+  const ctaRect = { left: SIDE, top: H - SAFE_BOTTOM - 40 - 132, width: W - SIDE * 2, height: 132 };
+  const st = await sharp(scene).extract(ctaRect).stats();
+  let behind = [0, 1, 2].map((k) => st.channels[k].mean) as RGB;
+  if (opts.layout === "bottomStack") {
+    const s0 = leg.scrimRgb.split(",").map(Number);
+    const a = leg.panel ? 0.9 : leg.alpha;
+    behind = behind.map((c, k) => (1 - a) * c + a * s0[k]) as RGB;
+  }
+  let ctaBg = brand.primary;
+  if (contrast(hexToRgb(ctaBg), behind) < 2.2) ctaBg = lum(behind) < 0.4 ? "#FFFFFF" : brand.ink;
   const cta = h(
     "div",
-    { alignSelf: "stretch", justifyContent: "center", alignItems: "center", height: 132, borderRadius: 66, background: brand.primary, color: onColor(brand.primary, brand.ink), fontSize: 48, fontWeight: 700, boxShadow: "0 12px 32px rgba(0,0,0,0.25)" },
+    { alignSelf: "stretch", justifyContent: "center", alignItems: "center", height: 132, borderRadius: 66, background: ctaBg, color: onColor(ctaBg, brand.ink), fontSize: 48, fontWeight: 700, boxShadow: "0 12px 32px rgba(0,0,0,0.25)" },
     copy.cta,
   );
   const ratingRow = copy.rating

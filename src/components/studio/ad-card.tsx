@@ -260,13 +260,18 @@ function FeedbackBox({ onSend }: { onSend: (t: string) => void }) {
 }
 
 function HowItWasMade({ v }: { v: VariantView }) {
-  const gen = (v.gen ?? {}) as { strategy?: string; model?: string; ms?: number; error?: string | null; cutout?: boolean; pasteBack?: { aligned: boolean }; legibility?: { panel: boolean; scrimAlpha: number } };
+  const gen = (v.gen ?? {}) as { strategy?: string; model?: string; ms?: number; error?: string | null; cutout?: boolean; pasteBack?: { aligned: boolean; restored?: boolean; diff?: number }; legibility?: { panel: boolean; scrimAlpha: number } };
   const qa = (v.qa ?? null) as { checked?: boolean; inventedText?: boolean; productMatches?: boolean; notes?: string } | null;
   const rows: [string, string][] = [];
   if (gen.strategy === "fal") rows.push(["Scene", `${gen.model?.replace("fal-ai/", "")} · ${Math.round((gen.ms ?? 0) / 1000)}s`]);
   else if (gen.strategy === "studio_fallback") rows.push(["Scene", `Studio backdrop (image model unavailable${gen.error ? `: ${gen.error.slice(0, 60)}` : ""})`]);
   else if (gen.strategy === "reused_scene") rows.push(["Scene", "Reused from previous version (copy-only change)"]);
-  if (gen.pasteBack) rows.push(["Product", gen.pasteBack.aligned ? `Original store pixels restored${gen.cutout ? " (cutout)" : ""}` : "Model's rendering (couldn't align original)"]);
+  if (gen.strategy === "studio_fallback") rows.push(["Product", "Original store photo, unedited"]);
+  else if (gen.pasteBack)
+    rows.push([
+      "Product",
+      gen.pasteBack.restored ? `Original store pixels restored${gen.cutout ? " (cutout)" : ""}` : gen.pasteBack.aligned ? "Model kept the store photo intact" : "Model's rendering (checked against the store photo)",
+    ]);
   if (qa?.checked) rows.push(["Checks", `${qa.inventedText ? "⚠ invented text" : "No invented text"} · ${qa.productMatches ? "product matches" : "⚠ product differs"}`]);
   if (gen.legibility) rows.push(["Legibility", gen.legibility.panel ? "Busy background: copy on a panel" : `Scrim ${Math.round(gen.legibility.scrimAlpha * 100)}% for 4.5:1 contrast`]);
   if (!rows.length) return null;

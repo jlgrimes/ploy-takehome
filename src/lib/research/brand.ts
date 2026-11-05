@@ -39,20 +39,31 @@ export function findLogo(html: string, origin: string, brandName: string | null)
     const file = src.split("?")[0].split("/").pop() ?? "";
     let score = 0;
     const why: string[] = [];
-    if (/logo/i.test(cls)) (score += 4), why.push("class");
-    if (/logo/i.test(file)) (score += 3), why.push("filename");
-    if (brandName && alt && alt.toLowerCase().includes(brandName.toLowerCase().slice(0, 5))) (score += 2), why.push("alt");
-    if ((m.index ?? 0) < headerEnd) (score += 2), why.push("header");
+    const add = (n: number, reason: string) => {
+      score += n;
+      why.push(reason);
+    };
+    if (/logo/i.test(cls)) add(4, "class");
+    if (/logo/i.test(file)) add(3, "filename");
+    if (brandName && alt && alt.toLowerCase().includes(brandName.toLowerCase().slice(0, 5))) add(2, "alt");
+    if ((m.index ?? 0) < headerEnd) add(2, "header");
     if (/guarantee|ship|payment|visa|paypal|badge|award|press|review|icon|flag|trust|secure/i.test(file + " " + alt)) score -= 6;
     if (score >= 4) candidates.push({ type: "img", url: absolutize(src, origin), score, why: why.join("+") });
   }
-  // Inline SVG logos (e.g. themes that embed the wordmark).
+  // Inline SVG logos (e.g. themes that embed the wordmark). Verified failure on
+  // liquiddeath.com: an account icon's markup also mentions "logo". Wordmarks are
+  // wide, so require a wide viewBox (or the brand name in the label) and skip UI icons.
   for (const m of html.slice(0, headerEnd + 50_000).matchAll(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi)) {
     const svg = m[0];
-    const open = svg.slice(0, 400);
-    if (!/logo/i.test(open) && !/aria-label=["'][^"']*logo/i.test(open)) continue;
+    const open = svg.slice(0, 600);
+    if (!/logo/i.test(open)) continue;
     if (svg.length < 300 || svg.length > 200_000) continue;
-    candidates.push({ type: "svg", svg, score: 5, why: "inline svg" });
+    if (/account|user|profile|cart|bag|search|menu|close|arrow|chevron|instagram|facebook|tiktok|twitter|youtube|pinterest|social/i.test(open)) continue;
+    const vb = open.match(/viewBox=["']\s*[\d.-]+[\s,]+[\d.-]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i);
+    const aspect = vb ? Number(vb[1]) / Math.max(1, Number(vb[2])) : 1;
+    const named = !!brandName && new RegExp(brandName.split(/\s+/)[0], "i").test(open);
+    if (aspect < 1.4 && !named) continue;
+    candidates.push({ type: "svg", svg, score: 5 + (aspect >= 2 ? 2 : 0) + (named ? 2 : 0), why: `inline svg (${aspect.toFixed(1)}:1)` });
   }
   candidates.sort((a, b) => b.score - a.score);
   return candidates[0] ?? null;
@@ -103,7 +114,9 @@ export function findHeadingFont(html: string, origin: string): { family: string;
     const woff = body.match(/url\(["']?([^)"']+\.(?:woff|ttf|otf)(?:\?[^)"']*)?)["']?\)/i)?.[1] ?? null;
     return { family, weight, woff };
   });
-  const family = varFamily ?? faces[0]?.family;
+  // Skip icon/widget fonts (verified on graza.co: a reviews widget's "oke-widget-icons").
+  const isIconFont = (f: string) => /icon|widget|awesome|glyph|slick|swiper|material symbols|dashicons/i.test(f);
+  const family = [varFamily, ...faces.map((f) => f.family)].find((f) => f && !isIconFont(f));
   if (!family) return null;
   const sameFamily = faces.filter((f) => f.family.toLowerCase() === family.toLowerCase() && f.woff);
   const best = sameFamily.sort((a, b) => Math.abs(700 - a.weight) - Math.abs(700 - b.weight))[0];

@@ -2,7 +2,7 @@ import "server-only";
 import sharp from "sharp";
 import { db, must } from "../db";
 import { saveAsset } from "../storage";
-import { buildGuide, pasteBackProduct } from "../render/guide";
+import { buildGuide, pasteBackProduct, plainBackgroundMask } from "../render/guide";
 import { LAYOUTS, layoutForAngle, type LayoutKey } from "../render/layouts";
 import { loadBrandFont, renderAd, type RenderBrand } from "../render/text-layer";
 import type { AdCopy, AngleKey, Brief } from "../types";
@@ -72,14 +72,26 @@ async function renderBrand(ctx: Awaited<ReturnType<typeof loadAdContext>>): Prom
   return value;
 }
 
-// Reference photo choice: lifestyle photos for lifestyle/social-proof angles (we
-// extend the brand's own photo), plain packshots for benefit/feature angles.
-function chooseReference(images: ImageRow[], angle: AngleKey, avoidId?: string | null): ImageRow | null {
+// Reference photo choice. Reviewing real output showed cut-out packshots integrate
+// best (the scene is built around the product), while full lifestyle photos tend to
+// read as a framed card and can't change their own background. So: prefer an image
+// with a plain, uniform background (checked on the pixels, not the alt text), and
+// fall back to a lifestyle photo only when the store has none.
+async function chooseReference(images: ImageRow[], avoidId?: string | null): Promise<ImageRow | null> {
   const usable = images.filter((i) => (i.width ?? 0) >= 600 && i.id !== avoidId);
   if (!usable.length) return images[0] ?? null;
-  const want = angle === "lifestyle" || angle === "social_proof" || angle === "gift" ? "lifestyle" : "packshot";
-  return usable.find((i) => i.kind === want) ?? usable[0];
+  const order = [...usable].sort((a, b) => rank(a) - rank(b) || (a.position ?? 99) - (b.position ?? 99));
+  for (const img of order.slice(0, 6)) {
+    try {
+      const url = img.source_url.includes("cdn.shopify.com") || img.source_url.includes("/cdn/shop/") ? `${img.source_url}${img.source_url.includes("?") ? "&" : "?"}width=400` : img.source_url;
+      if (await plainBackgroundMask(await bytesOf(url))) return img;
+    } catch {
+      /* try the next image */
+    }
+  }
+  return order.find((i) => i.kind === "lifestyle") ?? order[0];
 }
+const rank = (i: ImageRow) => (i.kind === "packshot" ? 0 : i.kind === "unknown" ? 1 : 2);
 
 async function referenceBytes(img: ImageRow, brandId: string, productId: string): Promise<Buffer> {
   if (img.asset_id) {
@@ -114,6 +126,7 @@ export async function generateVariant(opts: {
   feedbackId?: string | null;
   instruction?: string | null; // copy instruction from feedback
   sceneInstruction?: string | null;
+  sceneDirectionOverride?: string | null; // full replacement scene description from scene feedback
   copyOverride?: AdCopy | null; // manual edit from the UI
   rewriteCopy: boolean;
   reuseScene: boolean;
@@ -155,6 +168,9 @@ export async function generateVariant(opts: {
         keepScene: opts.reuseScene,
       });
     } else copy = opts.parent.copy;
+    // Scene feedback replaces the scene description outright (appending it to the
+    // old one gave the model contradictory directions, e.g. "café table" + "outdoors").
+    if (opts.sceneDirectionOverride) copy = { ...copy, sceneDirection: opts.sceneDirectionOverride };
     await db().from("ad_variants").update({ copy }).eq("id", variant.id);
 
     // 2. scene (reuse for copy-only changes)
@@ -171,7 +187,10 @@ export async function generateVariant(opts: {
       gen = { strategy: "reused_scene", fromVariant: opts.parent.id };
     } else {
       await setStatus("generating_scene");
-      const ref = (opts.parent?.reference_image_id && ctx.images.find((i) => i.id === opts.parent!.reference_image_id)) || chooseReference(ctx.images, ctx.ad.angle);
+      // A new scene direction gets a fresh reference choice (a lifestyle photo's own
+      // background can't become "outdoors"); otherwise keep the parent's reference.
+      const keepRef = opts.parent?.reference_image_id && !opts.sceneDirectionOverride ? ctx.images.find((i) => i.id === opts.parent!.reference_image_id) : null;
+      const ref = keepRef || (await chooseReference(ctx.images));
       if (!ref) throw new Error("This product has no usable photos.");
       referenceId = ref.id;
       const original = await referenceBytes(ref, ctx.brand.id, ctx.product.id);
@@ -183,7 +202,7 @@ export async function generateVariant(opts: {
       let scene = await generateScene({ guideUrl: guideAsset.public_url, prompt, studio: guide.studio });
       // Studio fallback already contains the exact product; only model output needs paste-back.
       const restore = (sc: typeof scene) =>
-        sc.strategy === "studio_fallback" ? Promise.resolve({ buffer: sc.bytes, aligned: true, diff: 0 }) : pasteBackProduct(sc.bytes, guide.buffer, guide.productRect, guide.productMask);
+        sc.strategy === "studio_fallback" ? Promise.resolve({ buffer: sc.bytes, aligned: true, diff: 0, restored: false }) : pasteBackProduct(sc.bytes, guide.buffer, guide.productRect, guide.productMask);
       let pasted = await restore(scene);
       let check = await checkScene({ original, scene: pasted.buffer, zonesHint: layout.sceneHint, productPixelsPasted: pasted.aligned });
       // One retry if the model invented text or lost the product.
@@ -192,12 +211,17 @@ export async function generateVariant(opts: {
         const second = await generateScene({ guideUrl: guideAsset.public_url, prompt: retryPrompt, studio: guide.studio });
         const pasted2 = await restore(second);
         const check2 = await checkScene({ original, scene: pasted2.buffer, zonesHint: layout.sceneHint, productPixelsPasted: pasted2.aligned });
-        if ((!check2.inventedText && check2.productMatches) || check.inventedText) (scene = second), (pasted = pasted2), (check = check2);
+        // Keep the retry if it's clean, or if the first attempt invented text (worst failure).
+        if ((!check2.inventedText && check2.productMatches) || check.inventedText) {
+          scene = second;
+          pasted = pasted2;
+          check = check2;
+        }
       }
       sceneBytes = pasted.buffer;
       const sceneAsset = await saveAsset({ bytes: sceneBytes, kind: "scene", brandId: ctx.brand.id, path: `${base}/scene.jpg`, mime: "image/jpeg", sourceUrl: scene.sourceUrl });
       sceneAssetId = sceneAsset.id;
-      gen = { strategy: scene.strategy, model: scene.model, falRequestId: scene.requestId, ms: scene.ms, prompt: scene.prompt, error: scene.error ?? null, cutout: !!guide.productMask, pasteBack: { aligned: pasted.aligned, diff: Math.round(pasted.diff) } };
+      gen = { strategy: scene.strategy, model: scene.model, falRequestId: scene.requestId, ms: scene.ms, prompt: scene.prompt, error: scene.error ?? null, cutout: !!guide.productMask, pasteBack: { aligned: pasted.aligned, restored: "restored" in pasted ? pasted.restored : false, diff: Math.round(pasted.diff) } };
       qa = check;
     }
 
@@ -349,7 +373,8 @@ export async function* reviseAd(opts: { adId: string; feedback: string; variantI
     parent: current,
     feedbackId: fb.id,
     instruction: plan.copyInstruction ?? (plan.kind !== "scene" ? opts.feedback : null),
-    sceneInstruction: isScene ? plan.sceneInstruction ?? opts.feedback : null,
+    sceneInstruction: isScene && !plan.newSceneDirection ? plan.sceneInstruction ?? opts.feedback : null,
+    sceneDirectionOverride: isScene ? plan.newSceneDirection : null,
     rewriteCopy: !isScene || plan.alsoChangeCopy,
     reuseScene: !isScene,
   });

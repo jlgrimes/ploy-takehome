@@ -171,7 +171,7 @@ export async function pasteBackProduct(
   // Our own fallback scene is derived from the guide, so the product cannot have
   // moved; skip the check (blur would otherwise fail it and leave the product soft).
   knownAligned = false,
-): Promise<{ buffer: Buffer; aligned: boolean; diff: number }> {
+): Promise<{ buffer: Buffer; aligned: boolean; diff: number; restored: boolean }> {
   const small = { width: 96, height: Math.max(8, Math.round((96 * rect.height) / rect.width)) };
   const a = await sharp(scene).extract(rect).resize(small).greyscale().raw().toBuffer();
   const b = await sharp(guide).extract(rect).resize(small).greyscale().raw().toBuffer();
@@ -184,7 +184,10 @@ export async function pasteBackProduct(
   }
   const diff = n ? sum / n : 255; // mean abs difference, 0-255
   const aligned = knownAligned || diff < 28;
-  if (!aligned) return { buffer: scene, aligned, diff };
+  if (!aligned) return { buffer: scene, aligned, diff, restored: false };
+  // Full lifestyle photo the model already reproduced near-exactly: pasting it back
+  // only adds a seam (seen on real output), so keep the model's seamless version.
+  if (!productMask && !knownAligned && diff < 14) return { buffer: scene, aligned, diff, restored: false };
   // Lifestyle photo: wide feathered rectangle so the seam blends into the extension
   // (an 18px feather left a visible seam on real fal output). Packshot: the cutout.
   const feather = Math.max(24, Math.round(Math.min(rect.width, rect.height) * 0.07));
@@ -206,5 +209,5 @@ export async function pasteBackProduct(
   }
   const productPixels = await sharp(productRgb).joinChannel(await sharp(mask).resize(rect.width, rect.height).toColourspace("b-w").raw().toBuffer(), { raw: { width: rect.width, height: rect.height, channels: 1 } }).png().toBuffer();
   const buffer = await sharp(scene).composite([{ input: productPixels, left: rect.left, top: rect.top }]).jpeg({ quality: 92 }).toBuffer();
-  return { buffer, aligned, diff };
+  return { buffer, aligned, diff, restored: true };
 }

@@ -142,11 +142,15 @@ export async function* runResearch(opts: { campaignId: string; url: string }): A
     const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
     return Math.max(r, g, b) - Math.min(r, g, b) < 18;
   };
-  let primary = colors.primary;
-  if (primary) prov.primary = { source: "scraped", detail: colors.source };
-  else if (basics.themeColor && !isNeutral(basics.themeColor)) (primary = basics.themeColor.toUpperCase()), (prov.primary = { source: "scraped", detail: "theme-color meta" });
-  else if (logoDominant && !isNeutral(logoDominant)) (primary = logoDominant), (prov.primary = { source: "inferred", detail: "dominant logo color" });
-  else (primary = "#111111"), (prov.primary = { source: "default" });
+  // Primary color: theme CSS > theme-color meta > dominant logo color > default.
+  const pickPrimary = (): [string, { source: Provenance; detail?: string }] => {
+    if (colors.primary) return [colors.primary, { source: "scraped", detail: colors.source }];
+    if (basics.themeColor && !isNeutral(basics.themeColor)) return [basics.themeColor.toUpperCase(), { source: "scraped", detail: "theme-color meta" }];
+    if (logoDominant && !isNeutral(logoDominant)) return [logoDominant, { source: "inferred", detail: "dominant logo color" }];
+    return ["#111111", { source: "default" }];
+  };
+  const [primary, primaryProv] = pickPrimary();
+  prov.primary = primaryProv;
   const kitColors = [
     { role: "primary", hex: primary },
     { role: "background", hex: colors.background ?? "#FFFFFF" },
