@@ -54,11 +54,39 @@ export async function plainBackgroundMask(img: Buffer): Promise<Buffer | null> {
     if (y > 0) push(i - w);
     if (y < h - 1) push(i + w);
   }
+  // Keep only the product's main shapes. Store packshots often carry small separate
+  // graphics (verified on deathwishcoffee.com: Fair Trade / USDA badges beside the
+  // box), which the model then scattered around the scene as extra objects.
+  const label = new Int32Array(w * h).fill(-1);
+  const sizes: number[] = [];
+  for (let s0 = 0; s0 < w * h; s0++) {
+    if (bg[s0] || label[s0] >= 0) continue;
+    const id = sizes.length;
+    let size = 0;
+    const st = [s0];
+    label[s0] = id;
+    while (st.length) {
+      const i = st.pop()!;
+      size++;
+      const x = i % w;
+      const y = (i / w) | 0;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
+        if (j >= 0 && !bg[j] && label[j] < 0) {
+          label[j] = id;
+          st.push(j);
+        }
+      }
+    }
+    sizes.push(size);
+  }
+  const largest = Math.max(0, ...sizes);
+  const keep = sizes.map((sz) => sz >= largest * 0.15);
   const alpha = Buffer.alloc(w * h);
   let fg = 0;
   for (let i = 0; i < w * h; i++) {
-    alpha[i] = bg[i] ? 0 : 255;
-    if (!bg[i]) fg++;
+    const on = !bg[i] && keep[label[i]];
+    alpha[i] = on ? 255 : 0;
+    if (on) fg++;
   }
   if (fg / (w * h) < 0.05 || fg / (w * h) > 0.92) return null; // nothing or everything left
   // Erode ~2px (JPEG ringing leaves a halo at edges), then soften the edge.

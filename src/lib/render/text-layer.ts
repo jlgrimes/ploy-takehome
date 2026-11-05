@@ -72,7 +72,10 @@ export const contrast = (a: RGB, b: RGB) => {
   const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
   return (x + 0.05) / (y + 0.05);
 };
-const onColor = (bg: string, ink: string) => (contrast(hexToRgb(bg), [255, 255, 255]) >= contrast(hexToRgb(bg), hexToRgb(ink)) ? "#FFFFFF" : ink);
+// Text color on a filled shape: the best of white, the brand ink and near-black.
+// (Verified failure: a dark-theme store's "ink" was light, so white-on-white.)
+const onColor = (bg: string, ink: string) =>
+  ["#FFFFFF", ink, "#111111"].reduce((best, c) => (contrast(hexToRgb(bg), hexToRgb(c)) > contrast(hexToRgb(bg), hexToRgb(best)) ? c : best));
 
 const TARGET = 4.5; // WCAG AA for text
 
@@ -158,7 +161,7 @@ export async function renderAd(opts: { scene: Buffer; layout: LayoutKey; copy: R
     behind = behind.map((c, k) => (1 - a) * c + a * s0[k]) as RGB;
   }
   let ctaBg = brand.primary;
-  if (contrast(hexToRgb(ctaBg), behind) < 2.2) ctaBg = lum(behind) < 0.4 ? "#FFFFFF" : brand.ink;
+  if (contrast(hexToRgb(ctaBg), behind) < 2.2) ctaBg = lum(behind) < 0.4 ? "#FFFFFF" : "#111111";
   const cta = h(
     "div",
     { alignSelf: "stretch", justifyContent: "center", alignItems: "center", height: 132, borderRadius: 66, background: ctaBg, color: onColor(ctaBg, brand.ink), fontSize: 48, fontWeight: 700, boxShadow: "0 12px 32px rgba(0,0,0,0.25)" },
