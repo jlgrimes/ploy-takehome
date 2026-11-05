@@ -9,6 +9,7 @@ From a store URL to full-screen 9:16 interstitial ads a marketer would actually 
 | Live app | https://ploy-takehome-kappa.vercel.app |
 | Repository | https://github.com/jlgrimes/ploy-takehome |
 | Architecture diagram (Excalidraw) | https://excalidraw.com/#json=L85UAHxx7c_c70ec2O6y4,INm_HNlXO7gTzTdGnxX_ig |
+| Key decisions | [KEY_DECISIONS.md](KEY_DECISIONS.md) |
 | Loom walkthrough | Coming soon |
 | Coding agent transcript | [transcripts/session-1.md](transcripts/session-1.md) |
 
