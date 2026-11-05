@@ -119,7 +119,13 @@ export function ChatPanel({
                     }
                     case "tool-reviseAd": {
                       if (part.state === "output-error") return <ToolError key={key} text={part.errorText} />;
-                      const out = part.state === "output-available" ? (part.output as { status: string; plan?: { summary?: string; kind?: string } }) : null;
+                      const out = part.state === "output-available" ? (part.output as { status: string; plan?: { summary?: string; kind?: string; confidence?: number | null; router?: string } }) : null;
+                      if (out?.status === "needs_clarification")
+                        return (
+                          <div key={key} className="rounded-lg border bg-card px-3 py-2 text-sm text-muted-foreground">
+                            Not sure what to change{out.plan?.confidence != null ? ` (best guess ${Math.round(out.plan.confidence * 100)}% ${out.plan.kind})` : ""}, so I'm asking first.
+                          </div>
+                        );
                       const done = out?.status === "ready";
                       const kind = out?.plan?.kind;
                       return (
@@ -128,7 +134,12 @@ export function ChatPanel({
                           <span className="min-w-0 truncate">
                             {done ? `New version: ${out?.plan?.summary ?? "updated"}` : out?.status === "failed" ? "Revision failed" : out?.status ?? "Revising"}
                           </span>
-                          {kind ? <span className="ml-auto shrink-0 rounded-full border px-2 py-px text-[10px] text-muted-foreground">{kind === "copy" ? "copy only" : kind === "scene" ? "new scene" : "brief"}</span> : null}
+                          {kind ? (
+                            <span className="ml-auto shrink-0 rounded-full border px-2 py-px text-[10px] text-muted-foreground" title={out?.plan?.router ? `Routed by ${out.plan.router}` : undefined}>
+                              {kind === "copy" ? "copy only" : kind === "scene" ? "new scene" : "brief"}
+                              {out?.plan?.confidence != null ? ` · ${Math.round(out.plan.confidence * 100)}%` : ""}
+                            </span>
+                          ) : null}
                         </div>
                       );
                     }

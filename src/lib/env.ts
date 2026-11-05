@@ -14,5 +14,7 @@ export const env = {
   // Model ids routed through the Vercel AI Gateway.
   agentModel: () => process.env.AGENT_MODEL ?? "anthropic/claude-sonnet-5.5",
   fastModel: () => process.env.FAST_MODEL ?? "anthropic/claude-haiku-5.5",
+  // Decision model for feedback routing (returns probabilities, not just a label).
+  routerModel: () => process.env.ROUTER_MODEL ?? "typesafe-ai/jev",
   sceneModel: () => process.env.FAL_SCENE_MODEL ?? "fal-ai/nano-banana-2/edit",
 };

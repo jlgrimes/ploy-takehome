@@ -357,6 +357,16 @@ export async function* reviseAd(opts: { adId: string; feedback: string; variantI
   if (!current) throw new Error("This ad has no finished version to revise yet.");
   yield { status: "Reading your feedback" };
   const plan = await planFeedback({ feedback: opts.feedback, current: current.copy });
+  if (plan.needsClarification) {
+    // The router wasn't confident: ask instead of spending a generation on a guess.
+    const top = Object.entries(plan.probabilities ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => k);
+    yield {
+      status: "needs_clarification",
+      plan,
+      result: { question: `Should I change the ${top.map((k) => (k === "copy" ? "wording" : k === "scene" ? "picture" : "brand-wide brief")).join(" or the ")}?`, options: top },
+    };
+    return;
+  }
   const fb = must(
     await db().from("feedback").insert({ ad_id: opts.adId, variant_id: current.id, text: opts.feedback, kind: plan.kind, interpretation: plan }).select("id").single(),
     "insert feedback",
