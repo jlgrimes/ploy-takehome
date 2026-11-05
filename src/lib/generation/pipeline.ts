@@ -218,6 +218,13 @@ export async function generateVariant(opts: {
           check = check2;
         }
       }
+      // Product fidelity beats a prettier scene: if the model still changed the
+      // product after the retry (verified: a pod box re-rendered from the side),
+      // ship the studio scene, which uses the exact store photo.
+      if (scene.strategy === "fal" && check.checked && !check.productMatches) {
+        scene = { ...scene, bytes: guide.studio, strategy: "studio_fallback", error: "model altered the product; used the exact store photo instead" };
+        pasted = { buffer: guide.studio, aligned: true, diff: 0, restored: false };
+      }
       sceneBytes = pasted.buffer;
       const sceneAsset = await saveAsset({ bytes: sceneBytes, kind: "scene", brandId: ctx.brand.id, path: `${base}/scene.jpg`, mime: "image/jpeg", sourceUrl: scene.sourceUrl });
       sceneAssetId = sceneAsset.id;
@@ -249,7 +256,7 @@ export async function generateVariant(opts: {
       .eq("id", variant.id);
     await db().from("ads").update({ status: "needs_review", updated_at: new Date().toISOString() }).eq("id", opts.adId);
     opts.onStatus?.("ready");
-    const fallbackNote = gen.strategy === "studio_fallback" ? `Image model unavailable (${String(gen.error ?? "").slice(0, 120)}); used a studio backdrop around the real product photo` : undefined;
+    const fallbackNote = gen.strategy === "studio_fallback" ? `Used a studio backdrop with the exact store photo (${String(gen.error ?? "").slice(0, 120)})` : undefined;
     return { variantId: variant.id, version: variant.version, renderUrl: renderAsset.public_url, copy, fallbackNote };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -29,6 +29,7 @@ export function scenePrompt(opts: { direction: string; layout: Layout; isCutout:
     `Scene: ${opts.direction}.`,
     opts.layout.sceneHint,
     opts.extraFeedback ? `Art direction from the brand: ${opts.extraFeedback}.` : "",
+    "The plain toned areas in the input are placeholders: replace them with a natural, photographic continuation of the same scene (wall, sky, surface, soft shadow), calm and uncluttered. Never leave flat grey or solid color blocks or visible frame edges.",
     "Absolutely no text, letters, numbers, words, logos, labels, signage, watermarks or UI anywhere in the image. Do not add any other products.",
   ]
     .filter(Boolean)
